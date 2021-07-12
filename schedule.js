@@ -81,10 +81,9 @@ function schedulingEmail() {
     });
 }
 
-// reading mail credentials from mail.json
 
 
-
+//insering error to db
 function errorLog(error, area) {
     var today = new Date();
     client.query(
