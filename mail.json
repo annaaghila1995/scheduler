@@ -1,0 +1,10 @@
+[
+    {
+        "user": "<FROM_EMAIL_ADDRESS>",
+        "subject": "Test Mail",
+        "text": "Welcome to neutrinos",
+        "password" : "<FROM_EMAIL_PASSWORD>"
+       
+    }
+]
+
