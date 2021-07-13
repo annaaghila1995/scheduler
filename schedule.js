@@ -4,94 +4,168 @@ let cron = require('node-cron');
 let nodemailer = require('nodemailer');
 var fs = require('fs');
 
+//environment file
+const dotenv = require('dotenv');
+dotenv.config();
+
 //declaration
 var email = []
 var mailformat = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*$/;
 
+//db connection
 client.connect()
 
 // fetching email ids from db 
+function empDataCollection() {
+    client.query('SELECT * from employees', (err, res) => {
 
-client.query('SELECT * from employees', (err, res) => {
-
-    console.log('fetching email ids')
-
-    res.rows.map(item => {
-        //email validation
-        if (mailformat.test(item.emailid.trim())) {
-            email.push(item.emailid)
+        if (err) {
+            errorLog(err, 'data fetching issue', 'Pending')
         } else {
-            let err = 'Invalid email' + item.emailid
-            console.log(err);
-            errorLog(err, 'email validation')
+
+            console.log('fetching email ids')
+            res.rows.map(item => {
+                //email validation
+                if (mailformat.test(item.emailid.trim())) {
+                    email.push(item.emailid)
+                } else {
+                    let err = 'Invalid email ' + item.emailid
+                    console.log(err);
+                    errorLog(err, 'email validation', 'Pending')
+
+                }
+            })
+
+
 
         }
     })
-    schedulingEmail()
-})
+}
 
 
+// e-mail transport configuration
+let transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+        user: `${process.env.USER}`,
+        pass: `${process.env.PASSWORD}`
+    }
+});
 
-function schedulingEmail() {
-    //reading mail credentials from file
-    fs.readFile('./mail.json', 'utf8', (err, data) => {
-        if (err) {
-            errorLog(err, 'file reader')
-        } else {
-            console.log('reading mail credentials from file')
 
-            const mail_credentials = JSON.parse(data)
-            // e-mail transport configuration
-            let transporter = nodemailer.createTransport({
-                service: 'gmail',
-                auth: {
-                    user: mail_credentials[0].user,
-                    pass: mail_credentials[0].password
+// e-mail message options
+let mailOptions = {
+    from: `${process.env.USER}`,
+    to: email,
+    subject: `${process.env.SUBJECT}`,
+    text: `${process.env.TEXT}`,
+    dsn: {
+        id: 'some random message specific id',
+        return: 'headers',
+        notify: ['failure', 'delay'],
+        recipient: 'annaaghila@gmail.com'
+    }
+};
+
+console.log('starting cron')
+// cron configuration for every 8 hr -> 0 */8 * * *
+
+//creating a cron for running every 5 minitue
+cron.schedule('5 * * * *', () => {
+    console.log('insideCron');
+    //data fetching
+    empDataCollection()
+    // Send e-mail
+    emailGeneration()
+});
+
+//cron for rescheduling
+cron.schedule('8 * * * *', () => {
+    console.log('inside rerunCron');
+
+    //data fetching
+    errorDataCollection()
+
+});
+
+//fetching data from errorlog table for rerun the scheduler
+function errorDataCollection() {
+    let today = new Date()
+    let pendingSchedule = ['']
+    let currentTime = new Date()
+    let timePeriod = new Date(currentTime.setMinutes(currentTime.getMinutes() - 8));
+
+    client.query(`SELECT * from schedule_error WHERE error_area != 'email validation' AND status != 'Success' AND datetime <= '${today}' AND datetime >= '${timePeriod}'`,
+        (err, res) => {
+            console.log(`SELECT * from schedule_error WHERE error_area != 'email validation' AND status != 'Success' AND datetime <= '${today}' AND datetime >= '${timePeriod}'`);
+            if (err) {
+                errorLog(err, 'reschedule', 'Pending')
+
+            } else {
+                pendingSchedule = res.rows
+                for (let errorrow of pendingSchedule) {
+                    reScheduling(errorrow);
                 }
-            });
+            }
 
+            //   console.log(res.rows);
+        })
+}
 
-            // e-mail message options
-            let mailOptions = {
-                from: mail_credentials[0].user,
-                to: email,
-                subject: mail_credentials[0].subject,
-                text: mail_credentials[0].text
-            };
-
-            console.log('starting cron')
-
-            // cron configuration for every 8 hr -> 0 */8 * * *
-
-            //creating a cron for running every minitue
-            cron.schedule('* * * * *', () => {
-                // Send e-mail
-                console.log('scheduling email')
-                transporter.sendMail(mailOptions, function (error, info) {
-                    if (error) {
-                        errorLog(error, 'schedule')
-                    } else {
-                        console.log('Email sent: ' + info.response);
-                    }
-                });
-            });
-
+//sending email
+function emailGeneration() {
+    transporter.sendMail(mailOptions, function (error, info) {
+        if (error) {
+            errorLog(error, 'schedule', 'Pending')
+        } else {
+            console.log('Email sent: ' + info.response);
+            // client.end()
         }
+    });
+}
 
+//rescheduling cron 
+function reScheduling(row) {
+    console.log('resceduling mails');
+    transporter.sendMail(mailOptions, function (error, info) {
+        if (error) {
+            update(row, 'Success')
+        } else {
+            console.log('Email resent: ' + info.response);
+            update(row, 'Failed')
+            client.end()
+        }
     });
 }
 
 
+//inserting error to db
 
-//insering error to db
-function errorLog(error, area) {
+function errorLog(error, area, status) {
     var today = new Date();
     client.query(
-        `INSERT INTO schedule_error(message, datetime,error_area)VALUES('${error}','${today}','${area}')`,
+        `INSERT INTO schedule_error(message, datetime,error_area,status)VALUES('${error}','${today}','${area}','${status}')`,
         (err, res) => {
             if (err) {
+
                 console.log(err)
             }
         }
     );
 }
+
+//updating db status after rescheduling the cron
+function update(row, status) {
+    let errorId = parseInt(row.errorId)
+    client.query(
+        `UPDATE  schedule_error SET status = '${status}' WHERE "errorId"= '${errorId}'`,
+        (err, res) => {
+            console.log(`UPDATE  schedule_error SET status = '${status}' WHERE "errorId"= '${errorId}'`);
+            if (err) {
+
+                errorLog(err, 'rescheduling updation failed', 'Failed')
+            }
+        }
+    );
+}
+
