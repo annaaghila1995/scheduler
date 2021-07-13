@@ -63,7 +63,7 @@ let mailOptions = {
         id: 'some random message specific id',
         return: 'headers',
         notify: ['failure', 'delay'],
-        recipient: 'annaaghila@gmail.com'
+        recipient: `${process.env.USER}`
     }
 };
 
@@ -71,7 +71,7 @@ console.log('starting cron')
 // cron configuration for every 8 hr -> 0 */8 * * *
 
 //creating a cron for running every 5 minitue
-cron.schedule('5 * * * *', () => {
+cron.schedule('*/5 * * * *', () => {
     console.log('insideCron');
     //data fetching
     empDataCollection()
@@ -80,7 +80,7 @@ cron.schedule('5 * * * *', () => {
 });
 
 //cron for rescheduling
-cron.schedule('8 * * * *', () => {
+cron.schedule('*/8 * * * *', () => {
     console.log('inside rerunCron');
 
     //data fetching
@@ -97,7 +97,6 @@ function errorDataCollection() {
 
     client.query(`SELECT * from schedule_error WHERE error_area != 'email validation' AND status != 'Success' AND datetime <= '${today}' AND datetime >= '${timePeriod}'`,
         (err, res) => {
-            console.log(`SELECT * from schedule_error WHERE error_area != 'email validation' AND status != 'Success' AND datetime <= '${today}' AND datetime >= '${timePeriod}'`);
             if (err) {
                 errorLog(err, 'reschedule', 'Pending')
 
@@ -139,7 +138,7 @@ function reScheduling(row) {
 }
 
 
-//inserting error to db
+//insering error to db
 
 function errorLog(error, area, status) {
     var today = new Date();
@@ -164,8 +163,9 @@ function update(row, status) {
             if (err) {
 
                 errorLog(err, 'rescheduling updation failed', 'Failed')
+            }else {
+                console.log('successfully updated');
             }
         }
     );
 }
-
